@@ -187,7 +187,6 @@
             <button onclick="copyShareLink('${doc.share_id}')">🔗 Share</button>
             <a href="${API_URL}/${doc.filepath}" download><button>⬇️ Download</button></a>
             <button onclick="editTags(${doc.id}, '${doc.tags || ''}')">✏️ Edit tags</button>
-            <button onclick="moveDocument(${doc.id})">📁 Move</button>
           </div>
         `;
         list.appendChild(li);
