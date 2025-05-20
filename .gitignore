@@ -1,0 +1,5 @@
+# .gitignore
+backend/uploads/
+*.dmg
+*.db
+node_modules/

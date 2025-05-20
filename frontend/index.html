@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DocuSafe</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>DocuSafe</h1>
+  <button onclick="logout()" style="display:none;" id="logout-btn">Logout</button>
+
+  <div id="login-box">
+    <h2>Login</h2>
+    <input type="text" id="login-username" placeholder="Username">
+    <input type="password" id="login-password" placeholder="Password">
+    <button onclick="login()">Login</button>
+    <p>or <a href="#" onclick="showRegister()">Register</a></p>
+  </div>
+
+  <div id="register-box" style="display:none;">
+    <h2>Register</h2>
+    <input type="text" id="register-username" placeholder="Username">
+    <input type="password" id="register-password" placeholder="Password">
+    <button onclick="register()">Register</button>
+    <p>or <a href="#" onclick="showLogin()">Login</a></p>
+  </div>
+
+  <div id="upload-box" style="display:none;">
+    <h2>Upload Document</h2>
+    <input type="text" id="new-folder-name" placeholder="New folder name">
+    <button onclick="createFolder()">Create Folder</button>
+
+    <select id="folder-select"></select>
+
+    <input type="file" id="file">
+    <input type="text" id="tags" placeholder="Tags">
+    <button onclick="upload()">Upload</button>
+    <input type="text" id="search-input" placeholder="Search by filename or tag" oninput="filterDocuments()">
+  </div>
+
+  <div id="document-list" style="display:none;">
+    <h2>Your Documents</h2>
+    <ul id="documents"></ul>
+  </div>
+
+  <script>
+    let userId = null;
+    let folderId = null;
+    let allDocuments = [];
+    const API_URL = "http://localhost:8080";
+
+    function showRegister() {
+      document.getElementById('login-box').style.display = 'none';
+      document.getElementById('register-box').style.display = 'block';
+    }
+
+    function showLogin() {
+      document.getElementById('register-box').style.display = 'none';
+      document.getElementById('login-box').style.display = 'block';
+    }
+
+    function logout() {
+      userId = null;
+      folderId = null;
+      document.getElementById('upload-box').style.display = 'none';
+      document.getElementById('document-list').style.display = 'none';
+      document.getElementById('logout-btn').style.display = 'none';
+      showLogin();
+    }
+
+    async function register() {
+      const username = document.getElementById('register-username').value;
+      const password = document.getElementById('register-password').value;
+      const res = await fetch(`${API_URL}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      alert(data.message);
+      showLogin();
+    }
+
+    async function login() {
+      const username = document.getElementById('login-username').value;
+      const password = document.getElementById('login-password').value;
+      const res = await fetch(`${API_URL}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        userId = data.user_id;
+        document.getElementById('login-box').style.display = 'none';
+        document.getElementById('upload-box').style.display = 'block';
+        document.getElementById('document-list').style.display = 'block';
+        document.getElementById('logout-btn').style.display = 'inline';
+        loadFolders();
+      } else {
+        alert(data.message);
+      }
+    }
+
+    async function createFolder() {
+      const folderName = document.getElementById("new-folder-name").value;
+      if (!folderName) return alert("Введите имя папки");
+
+      const res = await fetch(`${API_URL}/create-folder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, folderName })
+      });
+
+      const data = await res.json();
+      alert(data.message);
+      loadFolders();
+    }
+
+    async function loadFolders() {
+      const res = await fetch(`${API_URL}/folders?user_id=${userId}`);
+      const folders = await res.json();
+      const select = document.getElementById("folder-select");
+      select.innerHTML = "";
+      folders.forEach(f => {
+        const option = document.createElement("option");
+        option.value = f.id;
+        option.textContent = f.name;
+        select.appendChild(option);
+      });
+      if (folders.length > 0) {
+        folderId = folders[0].id;
+        loadDocuments();
+      }
+      select.onchange = () => {
+        folderId = select.value;
+        loadDocuments();
+      };
+    }
+
+    async function upload() {
+      const file = document.getElementById('file').files[0];
+      const tags = document.getElementById('tags').value;
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("tags", tags);
+      formData.append("user_id", userId);
+      formData.append("folder_id", folderId);
+
+      const res = await fetch(`${API_URL}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      alert(data.message);
+      loadDocuments();
+    }
+
+    async function deleteDocument(id) {
+      const confirmDel = confirm("Удалить документ?");
+      if (!confirmDel) return;
+      await fetch(`${API_URL}/documents/${id}`, { method: 'DELETE' });
+      loadDocuments();
+    }
+
+    async function loadDocuments() {
+      const res = await fetch(`${API_URL}/documents?user_id=${userId}&folder_id=${folderId}`);
+      allDocuments = await res.json();
+      renderDocuments(allDocuments);
+    }
+
+    function renderDocuments(docs) {
+      const list = document.getElementById('documents');
+      list.innerHTML = '';
+      docs.forEach(doc => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <strong>${doc.filename}</strong> — ${doc.tags}<br>
+          <small>${new Date(doc.uploaded_at).toLocaleString()}</small><br>
+          <a href="${doc.filepath}" target="_blank">Открыть</a> |
+          <a href="${API_URL}/share/${doc.share_id}" target="_blank" onclick="event.preventDefault(); copyToClipboard('${API_URL}/share/${doc.share_id}')">Поделиться</a> |
+          <a href="#" onclick="deleteDocument(${doc.id})">Удалить</a>
+        `;
+        list.appendChild(li);
+      });
+    }
+
+    function filterDocuments() {
+      const query = document.getElementById("search-input").value.toLowerCase();
+      const filtered = allDocuments.filter(doc =>
+        doc.filename.toLowerCase().includes(query) ||
+        doc.tags.toLowerCase().includes(query)
+      );
+      renderDocuments(filtered);
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert("Ссылка скопирована в буфер обмена:" + text);
+      });
+    }
+  </script>
+</body>
+</html>
