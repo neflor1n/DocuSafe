@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DocuSafe</title>
   <link rel="stylesheet" href="style.css">
+
 </head>
 <body>
   <h1>DocuSafe</h1>
@@ -26,13 +27,19 @@
     <p>or <a href="#" onclick="showLogin()">Login</a></p>
   </div>
 
+  <div id="settings-box" style="display:none;">
+    <h2>Change Credentials</h2>
+    <input type="password" id="current-password" placeholder="Current password">
+    <input type="text" id="new-username" placeholder="New username">
+    <input type="password" id="new-password" placeholder="New password">
+    <button onclick="changeCredentials()">Save Changes</button>
+  </div>
+
   <div id="upload-box" style="display:none;">
     <h2>Upload Document</h2>
     <input type="text" id="new-folder-name" placeholder="New folder name">
     <button onclick="createFolder()">Create Folder</button>
-
-    <select id="folder-select"></select>
-
+    <select id="folder-select" onchange="onFolderChange()"></select>
     <input type="file" id="file">
     <input type="text" id="tags" placeholder="Tags">
     <button onclick="upload()">Upload</button>
@@ -48,8 +55,8 @@
     let userId = null;
     let folderId = null;
     let allDocuments = [];
-    const API_URL = "https://docusafe.onrender.com";
-
+    //const API_URL = "https://docusafe.onrender.com";
+    const API_URL = "http://localhost:8080";
     function showRegister() {
       document.getElementById('login-box').style.display = 'none';
       document.getElementById('register-box').style.display = 'block';
@@ -65,6 +72,7 @@
       folderId = null;
       document.getElementById('upload-box').style.display = 'none';
       document.getElementById('document-list').style.display = 'none';
+      document.getElementById('settings-box').style.display = 'none';
       document.getElementById('logout-btn').style.display = 'none';
       showLogin();
     }
@@ -96,11 +104,18 @@
         document.getElementById('login-box').style.display = 'none';
         document.getElementById('upload-box').style.display = 'block';
         document.getElementById('document-list').style.display = 'block';
+        document.getElementById('settings-box').style.display = 'block';
         document.getElementById('logout-btn').style.display = 'inline';
         loadFolders();
       } else {
         alert(data.message);
       }
+    }
+
+    function onFolderChange() {
+      const select = document.getElementById("folder-select");
+      folderId = select.value;
+      loadDocuments();
     }
 
     async function createFolder() {
@@ -115,33 +130,14 @@
 
       const data = await res.json();
       alert(data.message);
-      loadFolders();
-    }
-
-    async function loadFolders() {
-      const res = await fetch(`${API_URL}/folders?user_id=${userId}`);
-      const folders = await res.json();
-      const select = document.getElementById("folder-select");
-      select.innerHTML = "";
-      folders.forEach(f => {
-        const option = document.createElement("option");
-        option.value = f.id;
-        option.textContent = f.name;
-        select.appendChild(option);
-      });
-      if (folders.length > 0) {
-        folderId = folders[0].id;
-        loadDocuments();
-      }
-      select.onchange = () => {
-        folderId = select.value;
-        loadDocuments();
-      };
+      await loadFolders();
     }
 
     async function upload() {
       const file = document.getElementById('file').files[0];
       const tags = document.getElementById('tags').value;
+      if (!file || !folderId) return alert("Выберите папку и файл");
+
       const formData = new FormData();
       formData.append("file", file);
       formData.append("tags", tags);
@@ -158,48 +154,114 @@
       loadDocuments();
     }
 
-    async function deleteDocument(id) {
-      const confirmDel = confirm("Удалить документ?");
-      if (!confirmDel) return;
-      await fetch(`${API_URL}/documents/${id}`, { method: 'DELETE' });
-      loadDocuments();
+    async function loadFolders() {
+      const res = await fetch(`${API_URL}/folders?user_id=${userId}`);
+      const folders = await res.json();
+      const select = document.getElementById("folder-select");
+      select.innerHTML = "";
+      folders.forEach(f => {
+        const option = document.createElement("option");
+        option.value = f.id;
+        option.innerText = f.name;
+        select.appendChild(option);
+      });
+      if (folders.length > 0) {
+        folderId = folders[0].id;
+        loadDocuments();
+      }
     }
 
     async function loadDocuments() {
       const res = await fetch(`${API_URL}/documents?user_id=${userId}&folder_id=${folderId}`);
-      allDocuments = await res.json();
-      renderDocuments(allDocuments);
-    }
-
-    function renderDocuments(docs) {
+      const docs = await res.json();
+      allDocuments = docs;
       const list = document.getElementById('documents');
       list.innerHTML = '';
       docs.forEach(doc => {
         const li = document.createElement('li');
         li.innerHTML = `
-          <strong>${doc.filename}</strong> — ${doc.tags}<br>
-          <small>${new Date(doc.uploaded_at).toLocaleString()}</small><br>
-          <a href="${doc.filepath}" target="_blank">Открыть</a> |
-          <a href="${API_URL}/share/${doc.share_id}" target="_blank" onclick="event.preventDefault(); copyToClipboard('${API_URL}/share/${doc.share_id}')">Поделиться</a> |
-          <a href="#" onclick="deleteDocument(${doc.id})">Удалить</a>
+          <strong>${doc.filename}</strong> — <span id="tags-${doc.id}">${doc.tags || ''}</span><br>
+          <small>${new Date(doc.uploaded_at).toLocaleString()}</small>
+          <div class="doc-actions">
+            <button onclick="deleteDocument(${doc.id})">🗑 Delete</button>
+            <button onclick="copyShareLink('${doc.share_id}')">🔗 Share</button>
+            <a href="${API_URL}/${doc.filepath}" download><button>⬇️ Download</button></a>
+            <button onclick="editTags(${doc.id}, '${doc.tags || ''}')">✏️ Edit tags</button>
+            <button onclick="moveDocument(${doc.id})">📁 Move</button>
+          </div>
         `;
         list.appendChild(li);
       });
     }
 
     function filterDocuments() {
-      const query = document.getElementById("search-input").value.toLowerCase();
-      const filtered = allDocuments.filter(doc =>
-        doc.filename.toLowerCase().includes(query) ||
-        doc.tags.toLowerCase().includes(query)
-      );
-      renderDocuments(filtered);
+      const term = document.getElementById("search-input").value.toLowerCase();
+      const list = document.getElementById("documents");
+      list.innerHTML = "";
+      allDocuments.filter(doc =>
+        doc.filename.toLowerCase().includes(term) ||
+        (doc.tags && doc.tags.toLowerCase().includes(term))
+      ).forEach(doc => {
+        const li = document.createElement("li");
+        li.innerHTML = `<a href="${API_URL}/${doc.filepath}" target="_blank">${doc.filename}</a> — ${doc.tags}`;
+        list.appendChild(li);
+      });
     }
 
-    function copyToClipboard(text) {
-      navigator.clipboard.writeText(text).then(() => {
-        alert("Ссылка скопирована в буфер обмена:" + text);
-      });
+    function deleteDocument(id) {
+      if (!confirm("Удалить этот документ?")) return;
+      fetch(`${API_URL}/documents/${id}`, {
+        method: "DELETE"
+      })
+        .then(res => res.json())
+        .then(data => {
+          alert(data.message);
+          loadDocuments();
+        });
+    }
+
+    function editTags(id, oldTags) {
+      const newTags = prompt("Введите новые теги:", oldTags);
+      if (newTags === null) return;
+
+      fetch(`${API_URL}/documents/${id}/tags`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: newTags })
+      })
+        .then(res => res.json())
+        .then(data => {
+          alert(data.message);
+          document.getElementById(`tags-${id}`).innerText = newTags;
+        });
+    }
+
+    function moveDocument(docId) {
+      fetch(`${API_URL}/folders?user_id=${userId}`)
+        .then(res => res.json())
+        .then(folders => {
+          const options = folders.map(f => `${f.id}: ${f.name}`).join('\n');
+          const chosen = prompt(`Выберите папку (введите ID):\n${options}`);
+          if (!chosen) return;
+
+          fetch(`${API_URL}/documents/${docId}/move`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folder_id: chosen })
+          })
+            .then(res => res.json())
+            .then(data => {
+              alert(data.message);
+              loadDocuments();
+            });
+        });
+    }
+
+    function copyShareLink(shareId) {
+      const link = `${API_URL}/share/${shareId}`;
+      navigator.clipboard.writeText(link)
+        .then(() => alert("Ссылка скопирована в буфер обмена"))
+        .catch(() => alert("Не удалось скопировать ссылку"));
     }
   </script>
 </body>
